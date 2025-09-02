@@ -24,8 +24,8 @@ jobs:
       - name: Restore Google Service Account JSON
         run: |
           mkdir -p $HOME/.secrets
-          echo "${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}" > $HOME/.secrets/credentials.json
-          ls -l $HOME/.secrets
+          echo "${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}" | base64 -d > $HOME/.secrets/credentials.json
+          cat $HOME/.secrets/credentials.json | jq . # sanity check
 
       - name: Run video poster bot
         env:
