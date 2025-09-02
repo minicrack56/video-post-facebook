@@ -14,7 +14,7 @@ from google.oauth2 import service_account
 # ------------------ Config ------------------
 FB_TOKEN = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
 FB_PAGE = os.getenv("FACEBOOK_PAGE_ID")
-GOOGLE_CREDS_FILE = "credentials.json"  # service account JSON
+GOOGLE_CREDS_FILE = os.path.expanduser("~/.secrets/credentials.json")  # safe path
 FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
 CACHE_FILE = "posted_cache.json"
 VIDEOS_PER_RUN = 2
@@ -47,7 +47,6 @@ def list_videos():
     query = f"'{FOLDER_ID}' in parents and mimeType contains 'video/' and trashed=false"
     results = service.files().list(q=query, fields="files(id,name)", pageSize=1000).execute()
     files = results.get("files", [])
-    # sort by filename number: Video1, Video2, ...
     files.sort(key=lambda x: int(''.join(filter(str.isdigit, x['name']))))
     return files
 
@@ -69,7 +68,7 @@ def post_video(video_url):
 # ------------------ Main ------------------
 def main():
     if not all([FB_PAGE, FB_TOKEN, FOLDER_ID]):
-        raise SystemExit("Set FACEBOOK_PAGE_ID, FACEBOOK_PAGE_ACCESS_TOKEN and GOOGLE_DRIVE_FOLDER_ID")
+        raise SystemExit("Set FACEBOOK_PAGE_ID, FACEBOOK_PAGE_ACCESS_TOKEN, and GOOGLE_DRIVE_FOLDER_ID")
 
     videos = list_videos()
     if not videos:
