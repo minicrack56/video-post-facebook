@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Upload 2 videos per day from Google Drive to Facebook Page.
-Loops back to Video1 after the last video.
+Post 2 videos per day from Google Drive folder to Facebook Page.
+Uses Google Service Account credentials.
+Remembers last posted index in posted_cache.json and loops back after last video.
 """
 
 import os
@@ -10,62 +11,50 @@ import requests
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
-# --------------------------------------------------------------
+# ------------------ Config ------------------
 FB_TOKEN = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
-FB_PAGE  = os.getenv("FACEBOOK_PAGE_ID")
-
-# Path to Google service account credentials JSON
-GOOGLE_CREDS = "credentials.json"
-FOLDER_ID    = os.getenv("GOOGLE_DRIVE_FOLDER_ID")  # folder where videos are stored
-
+FB_PAGE = os.getenv("FACEBOOK_PAGE_ID")
+GOOGLE_CREDS_FILE = "credentials.json"  # service account JSON
+FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
 CACHE_FILE = "posted_cache.json"
+VIDEOS_PER_RUN = 2
 
 CAPTION = """Don't forget to subscribe for more!
 
 #movie #movieclips #movienetflix #fyp #fypシ゚viralシ #viral #facebookvideo
 """
-# --------------------------------------------------------------
-
-
+# ------------------ Cache ------------------
 def load_index():
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r") as f:
-            return json.load(f).get("index", 0)
+            return json.load(f).get("last_index", 0)
     return 0
-
 
 def save_index(index):
     with open(CACHE_FILE, "w") as f:
-        json.dump({"index": index}, f)
+        json.dump({"last_index": index}, f)
 
-
+# ------------------ Google Drive ------------------
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_file(
-        GOOGLE_CREDS,
-        scopes=["https://www.googleapis.com/auth/drive.readonly"],
+        GOOGLE_CREDS_FILE,
+        scopes=["https://www.googleapis.com/auth/drive.readonly"]
     )
-    return build("drive", "v3", credentials=creds)
-
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 def list_videos():
-    """Return sorted list of (id, name) for videos in Drive folder."""
     service = get_drive_service()
-    query = f"'{FOLDER_ID}' in parents and mimeType contains 'video/'"
-    results = (
-        service.files()
-        .list(q=query, fields="files(id, name)", pageSize=1000)
-        .execute()
-    )
+    query = f"'{FOLDER_ID}' in parents and mimeType contains 'video/' and trashed=false"
+    results = service.files().list(q=query, fields="files(id,name)", pageSize=1000).execute()
     files = results.get("files", [])
-    # Sort by filename like Video1, Video2, ...
+    # sort by filename number: Video1, Video2, ...
     files.sort(key=lambda x: int(''.join(filter(str.isdigit, x['name']))))
     return files
-
 
 def get_video_url(file_id):
     return f"https://drive.google.com/uc?export=download&id={file_id}"
 
-
+# ------------------ Facebook ------------------
 def post_video(video_url):
     url = f"https://graph.facebook.com/v20.0/{FB_PAGE}/videos"
     payload = {
@@ -73,12 +62,15 @@ def post_video(video_url):
         "description": CAPTION,
         "access_token": FB_TOKEN,
     }
-    r = requests.post(url, data=payload, timeout=60)
+    r = requests.post(url, data=payload, timeout=120)
     r.raise_for_status()
     return r.json().get("id")
 
-
+# ------------------ Main ------------------
 def main():
+    if not all([FB_PAGE, FB_TOKEN, FOLDER_ID]):
+        raise SystemExit("Set FACEBOOK_PAGE_ID, FACEBOOK_PAGE_ACCESS_TOKEN and GOOGLE_DRIVE_FOLDER_ID")
+
     videos = list_videos()
     if not videos:
         print("No videos found in Drive folder.")
@@ -91,13 +83,12 @@ def main():
     to_post = [videos[index % total], videos[(index + 1) % total]]
 
     for v in to_post:
-        url = get_video_url(v["id"])
-        fb_id = post_video(url)
-        print(f"Posted {v['name']} -> Facebook ID {fb_id}")
+        video_url = get_video_url(v["id"])
+        fb_id = post_video(video_url)
+        print(f"Posted {v['name']} → Facebook ID {fb_id}")
 
-    # update index
-    save_index((index + 2) % total)
-
+    # update index for next run
+    save_index((index + VIDEOS_PER_RUN) % total)
 
 if __name__ == "__main__":
     main()
