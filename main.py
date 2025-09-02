@@ -60,10 +60,13 @@ def post_video(video_url):
         "file_url": video_url,
         "description": CAPTION,
         "access_token": FB_TOKEN,
+        "published": "true"   # ensures the video is immediately visible
     }
     r = requests.post(url, data=payload, timeout=120)
     r.raise_for_status()
-    return r.json().get("id")
+    fb_id = r.json().get("id")
+    print(f"Video uploaded, Facebook ID: {fb_id}")
+    return fb_id
 
 # ------------------ Main ------------------
 def main():
