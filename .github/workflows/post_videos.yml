@@ -2,8 +2,8 @@ name: Post Videos to Facebook
 
 on:
   schedule:
-    - cron: "0 10 * * *"  # every day at 10:00 UTC (change if needed)
-  workflow_dispatch:       # allows manual trigger
+    - cron: "0 10 * * *"  # daily at 10:00 UTC
+  workflow_dispatch:       # manual trigger
 
 jobs:
   post:
@@ -23,8 +23,9 @@ jobs:
 
       - name: Restore Google Service Account JSON
         run: |
-          echo "${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}" > credentials.json
-          ls -l credentials.json
+          mkdir -p $HOME/.secrets
+          echo "${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}" > $HOME/.secrets/credentials.json
+          ls -l $HOME/.secrets
 
       - name: Run video poster bot
         env:
