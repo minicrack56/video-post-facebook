@@ -1,70 +1,98 @@
 name: Post Videos to Facebook
 
-# ---------------- SCHEDULE ----------------
 on:
   schedule:
     - cron: "0 10 * * *"  # daily at 10:00 UTC
-  workflow_dispatch:       # allow manual trigger
+  workflow_dispatch:       # manual trigger
 
-# ---------------- PERMISSIONS ----------------
 permissions:
-  contents: write   # allows the workflow to push changes
+  contents: write   # ensure workflow can push updates to repo
 
 jobs:
   post:
     runs-on: ubuntu-latest
 
     steps:
-      # --- Checkout repo ---
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          persist-credentials: false
-          fetch-depth: 0   # need full history to switch branches
+          fetch-depth: 0
 
-      # --- Set up Python ---
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # --- Install dependencies ---
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          set -euo pipefail
+          pip install -r requirements.txt
 
-      # --- Restore Google Service Account JSON ---
       - name: Restore Google Service Account JSON
         run: |
-          mkdir -p $HOME/.secrets
-          echo "${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}" | base64 -d > $HOME/.secrets/credentials.json
+          set -euo pipefail
+          mkdir -p "$HOME/.secrets"
+          echo "${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}" | base64 -d > "$HOME/.secrets/credentials.json"
 
-      # --- Run video poster script ---
+      # Load the cache file from the remote 'video-cache' branch if it exists, without switching branches
+      - name: Load cache from video-cache (if any)
+        run: |
+          set -euo pipefail
+          git fetch origin video-cache || true
+          if git show-ref --verify --quiet refs/remotes/origin/video-cache; then
+            # Safely read the file from the remote branch; if missing, initialize
+            if git cat-file -e origin/video-cache:posted_cache.json 2>/dev/null; then
+              git show origin/video-cache:posted_cache.json > posted_cache.json
+            else
+              echo '{"last_index": 0, "last_day": ""}' > posted_cache.json
+            fi
+          else
+            echo '{"last_index": 0, "last_day": ""}' > posted_cache.json
+          fi
+          echo "Loaded cache:"
+          cat posted_cache.json || true
+
       - name: Run video poster bot
         env:
           FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
-          FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
-          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
-        run: python main.py
-
-      # --- Commit and push updated posted_cache.json to video-cache branch ---
-      - name: Commit cache (posted index)
+          FACEBOOK_PAGE_ID:          ${{ secrets.FACEBOOK_PAGE_ID }}
+          GOOGLE_DRIVE_FOLDER_ID:    ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions"
+          python main.py
+          echo "Cache after script:"
+          cat posted_cache.json
+
+      # Commit the updated cache into the 'video-cache' branch (robustly)
+      - name: Commit updated cache to video-cache
+        run: |
+          set -euo pipefail
+
+          # Keep a copy of the updated cache before switching branches
+          TMP_CACHE="$(mktemp)"
+          cp posted_cache.json "$TMP_CACHE"
+
+          git config user.name  "github-actions"
           git config user.email "github-actions@github.com"
 
-          # Fetch and switch to video-cache branch
           git fetch origin video-cache || true
-          git checkout video-cache || git checkout --orphan video-cache
-
-          # Add updated cache
-          git add posted_cache.json
-
-          # Commit only if there are changes
-          if ! git diff --cached --quiet; then
-            git commit -m "Update posted index"
-            # Push using GITHUB_TOKEN to ensure write permission
-            git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} HEAD:video-cache
+          if git show-ref --verify --quiet refs/remotes/origin/video-cache; then
+            git checkout -B video-cache origin/video-cache
           else
+            git checkout --orphan video-cache
+            # Ensure workspace contains only what we intend to commit for this branch
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          # Restore the updated cache into this branch's working tree
+          cp "$TMP_CACHE" posted_cache.json
+          rm -f "$TMP_CACHE"
+
+          git add posted_cache.json
+          if git diff --cached --quiet; then
             echo "No changes to commit"
+          else
+            git commit -m "Update posted index"
+            # Use GITHUB_TOKEN explicitly to avoid 403
+            git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" HEAD:video-cache
           fi
