@@ -6,7 +6,7 @@ on:
   workflow_dispatch:       # manual trigger
 
 permissions:
-  contents: write   # ensure workflow can push updates to repo
+  contents: write   # allow pushing to repo
 
 jobs:
   post:
@@ -15,8 +15,6 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -24,51 +22,26 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          set -euo pipefail
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Restore Google Service Account JSON
         run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.secrets"
-          echo "${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}" | base64 -d > "$HOME/.secrets/credentials.json"
-
-      # Load the cache file from the remote 'video-cache' branch if it exists, without switching branches
-      - name: Load cache from video-cache (if any)
-        run: |
-          set -euo pipefail
-          git fetch origin video-cache || true
-          if git show-ref --verify --quiet refs/remotes/origin/video-cache; then
-            # Safely read the file from the remote branch; if missing, initialize
-            if git cat-file -e origin/video-cache:posted_cache.json 2>/dev/null; then
-              git show origin/video-cache:posted_cache.json > posted_cache.json
-            else
-              echo '{"last_index": 0, "last_day": ""}' > posted_cache.json
-            fi
-          else
-            echo '{"last_index": 0, "last_day": ""}' > posted_cache.json
-          fi
-          echo "Loaded cache:"
-          cat posted_cache.json || true
+          mkdir -p $HOME/.secrets
+          echo "${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}" | base64 -d > $HOME/.secrets/credentials.json
+          cat $HOME/.secrets/credentials.json | jq . # sanity check
 
       - name: Run video poster bot
         env:
           FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
-          FACEBOOK_PAGE_ID:          ${{ secrets.FACEBOOK_PAGE_ID }}
-          GOOGLE_DRIVE_FOLDER_ID:    ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
-        run: |
-          set -euo pipefail
-          python main.py
-          echo "Cache after script:"
-          cat posted_cache.json
+          FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+        run: python main.py
 
-      # Commit the updated cache into the 'video-cache' branch (robustly)
       - name: Commit updated cache to video-cache
         run: |
           set -euo pipefail
 
-          # Keep a copy of the updated cache before switching branches
+          # Save the updated cache to a temp file
           TMP_CACHE="$(mktemp)"
           cp posted_cache.json "$TMP_CACHE"
 
@@ -77,14 +50,15 @@ jobs:
 
           git fetch origin video-cache || true
           if git show-ref --verify --quiet refs/remotes/origin/video-cache; then
+            # Reset local changes and switch to video-cache
+            git reset --hard
             git checkout -B video-cache origin/video-cache
           else
             git checkout --orphan video-cache
-            # Ensure workspace contains only what we intend to commit for this branch
             git rm -rf . >/dev/null 2>&1 || true
           fi
 
-          # Restore the updated cache into this branch's working tree
+          # Restore updated cache
           cp "$TMP_CACHE" posted_cache.json
           rm -f "$TMP_CACHE"
 
@@ -93,6 +67,5 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "Update posted index"
-            # Use GITHUB_TOKEN explicitly to avoid 403
             git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" HEAD:video-cache
           fi
