@@ -13,7 +13,6 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          persist-credentials: false
           fetch-depth: 0
 
       - name: Set up Python
@@ -22,19 +21,12 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt google-api-python-client google-auth-httplib2 google-auth-oauthlib requests
 
       - name: Restore Google Service Account JSON
         run: |
           mkdir -p $HOME/.secrets
           echo "${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}" | base64 -d > $HOME/.secrets/credentials.json
-
-      - name: Switch to video-cache branch
-        run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git fetch origin video-cache
-          git checkout video-cache
 
       - name: Run video poster bot
         env:
@@ -43,12 +35,22 @@ jobs:
           GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
         run: python main.py
 
-      - name: Commit updated posted_cache.json
+      - name: Commit cache (posted index)
         run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+
+          # Switch to video-cache branch
+          git fetch origin video-cache
+          git checkout video-cache
+
+          # Copy updated posted_cache.json into branch workspace
+          cp -f posted_cache.json . || true
           git add posted_cache.json
+
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
             git commit -m "Update posted index"
-            git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} video-cache
+            git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} HEAD:video-cache
           fi
