@@ -43,28 +43,55 @@ jobs:
       # ----------------- Commit Cache -----------------
       - name: Commit cache to video-cache branch
         run: |
+          set -euo pipefail
+
           git config user.name github-actions
           git config user.email github-actions@github.com
 
-          # ensure latest remote refs
+          # Show current branch and posted_cache.json BEFORE branch switch
+          echo "[DEBUG] workspace branch and posted_cache.json BEFORE switch"
+          git rev-parse --abbrev-ref HEAD || true
+          echo "[DEBUG] workspace posted_cache.json:"
+          if [ -f posted_cache.json ]; then
+            cat posted_cache.json
+          else
+            echo "(missing)"
+          fi
+
+          # Save workspace copy to temp (avoid being overwritten by checkout)
+          if [ -f posted_cache.json ]; then
+            cp posted_cache.json /tmp/posted_cache.json
+          else
+            echo '{"last_index": 0}' > /tmp/posted_cache.json
+          fi
+
+          # Ensure we have remote refs
           git fetch origin || true
 
-          # If remote video-cache exists, check it out and reset to remote version.
+          # If remote video-cache exists, checkout and reset to remote; otherwise create from current branch
           if git ls-remote --exit-code --heads origin video-cache; then
             git checkout video-cache
             git reset --hard origin/video-cache
           else
-            # create a local branch from current default branch (checked out by actions/checkout)
+            # create video-cache from current branch (safe)
             git checkout -b video-cache
           fi
 
-          # ensure posted_cache.json from workspace is staged
+          echo "[DEBUG] Now on branch:"
+          git rev-parse --abbrev-ref HEAD
+
+          # Overwrite branch file with workspace copy
+          cp -f /tmp/posted_cache.json posted_cache.json
+
+          echo "[DEBUG] posted_cache.json in branch after copy:"
+          cat posted_cache.json
+
           git add posted_cache.json
 
-          # commit only if there are changes
           if git diff --cached --quiet; then
-            echo "No changes to commit"
+            echo "[DEBUG] No changes to commit"
           else
             git commit -m "Update posted index"
             git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" HEAD:video-cache
+            echo "[DEBUG] pushed updated posted_cache.json to video-cache"
           fi
