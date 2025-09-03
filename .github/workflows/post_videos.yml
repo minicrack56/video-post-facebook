@@ -1,17 +1,16 @@
 name: Post Videos to Facebook
 
-# ensure workflow can push updates to repo (GITHUB_TOKEN needs write)
-permissions:
-  contents: write
-
 on:
   schedule:
     - cron: "0 10 * * *"  # daily at 10:00 UTC
-  workflow_dispatch:
+  workflow_dispatch:       # manual trigger
 
 jobs:
   post:
     runs-on: ubuntu-latest
+    concurrency:
+      group: post-videos
+      cancel-in-progress: false
 
     steps:
       - name: Checkout repo
@@ -33,6 +32,13 @@ jobs:
           mkdir -p $HOME/.secrets
           echo "${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}" | base64 -d > $HOME/.secrets/credentials.json
 
+      - name: Switch to video-cache branch
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git fetch origin video-cache
+          git checkout video-cache
+
       - name: Run video poster bot
         env:
           FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
@@ -40,69 +46,12 @@ jobs:
           GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
         run: python main.py
 
-      - name: Commit cache to video-cache branch (diagnostic & safe)
+      - name: Commit updated posted_cache.json
         run: |
-          set -euo pipefail
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-
-          echo "=== DEBUG: workspace BEFORE move ==="
-          git rev-parse --abbrev-ref HEAD || true
-          echo "workspace posted_cache.json content:"
-          if [ -f posted_cache.json ]; then
-            cat posted_cache.json || true
-          else
-            echo "(missing)"
-          fi
-          echo "=== end DEBUG ==="
-
-          # MOVE workspace copy to tmp to avoid git checkout conflicts
-          if [ -f posted_cache.json ]; then
-            mv posted_cache.json /tmp/posted_cache.json
-          else
-            echo '{"last_index": 0}' > /tmp/posted_cache.json
-          fi
-
-          # fetch remote refs
-          git fetch origin || true
-
-          # checkout remote video-cache if exists, otherwise create from current branch
-          if git ls-remote --exit-code --heads origin video-cache; then
-            echo "[DBG] remote video-cache exists; checking out"
-            git checkout video-cache
-            git reset --hard origin/video-cache
-          else
-            echo "[DBG] remote video-cache missing; creating local branch from current"
-            git checkout -b video-cache
-          fi
-
-          echo "=== DEBUG: branch after checkout ==="
-          git rev-parse --abbrev-ref HEAD
-          echo "posted_cache.json in branch BEFORE copy:"
-          if [ -f posted_cache.json ]; then
-            cat posted_cache.json || true
-          else
-            echo "(missing)"
-          fi
-          echo "=== end DEBUG ==="
-
-          # copy workspace-saved file into branch working tree
-          cp -f /tmp/posted_cache.json posted_cache.json
-
-          echo "=== DEBUG: branch AFTER copy ==="
-          cat posted_cache.json || true
-          echo "=== git status (short) ==="
-          git status --porcelain || true
-          echo "=== git diff (staged vs HEAD) ==="
           git add posted_cache.json
-          git diff --staged -- posted_cache.json || true
-          echo "=== end DEBUG ==="
-
-          # commit only if there's a real change
-          if git diff --staged --quiet; then
-            echo "[INFO] No staged changes to commit"
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
           else
             git commit -m "Update posted index"
-            git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" HEAD:video-cache
-            echo "[INFO] pushed updated posted_cache.json to video-cache"
+            git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} video-cache
           fi
