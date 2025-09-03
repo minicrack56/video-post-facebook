@@ -46,22 +46,22 @@ jobs:
           git config user.name github-actions
           git config user.email github-actions@github.com
 
-          # fetch the branch if exists
-          git fetch origin video-cache || true
+          # ensure latest remote refs
+          git fetch origin || true
 
-          # checkout video-cache if it exists, otherwise create it
-          if git show-ref --verify --quiet refs/heads/video-cache; then
+          # If remote video-cache exists, check it out and reset to remote version.
+          if git ls-remote --exit-code --heads origin video-cache; then
             git checkout video-cache
+            git reset --hard origin/video-cache
           else
-            git checkout --orphan video-cache
-            # ensure index is clean on orphan
-            git rm -rf --cached . || true
+            # create a local branch from current default branch (checked out by actions/checkout)
+            git checkout -b video-cache
           fi
 
-          # add updated posted_cache.json
+          # ensure posted_cache.json from workspace is staged
           git add posted_cache.json
 
-          # commit only if changes exist
+          # commit only if there are changes
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
