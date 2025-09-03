@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Post 2 videos per day from Google Drive folder to Facebook Page.
-Uses Google Service Account credentials.
-Remembers last posted index in posted_cache.json and loops back after last video.
+Keeps track of last posted index and loops back automatically.
 """
 
 import os
@@ -26,19 +25,20 @@ CAPTION = """Don't forget to subscribe for more!
 
 # ------------------ Cache Handling ------------------
 def load_index():
+    """Load last posted index, auto-initialize if missing or corrupted."""
     if not os.path.exists(CACHE_FILE):
-        save_index(0)  # initialize if missing
+        save_index(0)
         return 0
     try:
         with open(CACHE_FILE, "r") as f:
             data = json.load(f)
             return data.get("last_index", 0)
     except Exception:
-        # corrupted file, reset
         save_index(0)
         return 0
 
 def save_index(index):
+    """Save last posted index to cache."""
     with open(CACHE_FILE, "w") as f:
         json.dump({"last_index": index}, f)
 
@@ -55,6 +55,7 @@ def list_videos():
     query = f"'{FOLDER_ID}' in parents and mimeType contains 'video/' and trashed=false"
     results = service.files().list(q=query, fields="files(id,name)", pageSize=1000).execute()
     files = results.get("files", [])
+    # sort numerically if filenames contain numbers
     files.sort(key=lambda x: int(''.join(filter(str.isdigit, x['name'])) or 0))
     return files
 
@@ -62,7 +63,7 @@ def get_video_url(file_id):
     return f"https://drive.google.com/uc?export=download&id={file_id}"
 
 # ------------------ Facebook ------------------
-def post_video(video_url):
+def post_video(video_url, video_name):
     url = f"https://graph.facebook.com/v20.0/{FB_PAGE}/videos"
     payload = {
         "file_url": video_url,
@@ -73,7 +74,7 @@ def post_video(video_url):
     r = requests.post(url, data=payload, timeout=120)
     r.raise_for_status()
     fb_id = r.json().get("id")
-    print(f"Video uploaded, Facebook ID: {fb_id}")
+    print(f"[OK] Posted '{video_name}' → Facebook ID: {fb_id}")
     return fb_id
 
 # ------------------ Main ------------------
@@ -83,22 +84,27 @@ def main():
 
     videos = list_videos()
     if not videos:
-        print("No videos found in Drive folder.")
+        print("[WARN] No videos found in Drive folder.")
         return
 
     total = len(videos)
     index = load_index()
+    print(f"[INFO] Last posted index: {index}, total videos: {total}")
 
-    # pick VIDEOS_PER_RUN in order
+    # pick next set of videos
     to_post = [videos[(index + i) % total] for i in range(VIDEOS_PER_RUN)]
+    print("[INFO] Videos scheduled for posting today:")
+    for v in to_post:
+        print(f"  - {v['name']}")
 
     for v in to_post:
         video_url = get_video_url(v["id"])
-        fb_id = post_video(video_url)
-        print(f"Posted {v['name']} → Facebook ID {fb_id}")
+        post_video(video_url, v["name"])
 
     # update index for next run
-    save_index((index + VIDEOS_PER_RUN) % total)
+    new_index = (index + VIDEOS_PER_RUN) % total
+    save_index(new_index)
+    print(f"[INFO] Updated last_index to {new_index} for next run")
 
 if __name__ == "__main__":
     main()
