@@ -32,7 +32,7 @@ def load_index():
     try:
         with open(CACHE_FILE, "r") as f:
             data = json.load(f)
-            return data.get("last_index", 0)
+            return int(data.get("last_index", 0))
     except Exception:
         save_index(0)
         return 0
@@ -40,7 +40,7 @@ def load_index():
 def save_index(index):
     """Save last posted index to cache."""
     with open(CACHE_FILE, "w") as f:
-        json.dump({"last_index": index}, f)
+        json.dump({"last_index": int(index)}, f)
 
 # ------------------ Google Drive ------------------
 def get_drive_service():
@@ -55,8 +55,11 @@ def list_videos():
     query = f"'{FOLDER_ID}' in parents and mimeType contains 'video/' and trashed=false"
     results = service.files().list(q=query, fields="files(id,name)", pageSize=1000).execute()
     files = results.get("files", [])
-    # sort numerically if filenames contain numbers
-    files.sort(key=lambda x: int(''.join(filter(str.isdigit, x['name'])) or 0))
+    # sort numerically if filenames contain numbers; fallback to name
+    def numeric_sort_key(item):
+        s = ''.join(filter(str.isdigit, item.get('name', '')))
+        return int(s) if s else 0
+    files.sort(key=lambda x: (numeric_sort_key(x), x.get("name", "")))
     return files
 
 def get_video_url(file_id):
