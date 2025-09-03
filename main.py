@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Post 2 videos per day from Google Drive folder to Facebook Page.
-Remembers last posted index in posted_cache.json and loops back after last video.
+Remembers last posted index in posted_cache.json in video-cache branch.
 Ensures no duplicates in the same UTC day.
 """
 
