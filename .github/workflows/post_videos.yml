@@ -48,11 +48,9 @@ jobs:
       - name: Commit cache to video-cache branch (robust)
         run: |
           set -euo pipefail
-
           git config user.name github-actions
           git config user.email github-actions@github.com
 
-          # Show workspace debug info BEFORE branch switch
           echo "[DEBUG] workspace branch and posted_cache.json BEFORE switch"
           git rev-parse --abbrev-ref HEAD || true
           echo "[DEBUG] workspace posted_cache.json:"
@@ -62,9 +60,9 @@ jobs:
             echo "(missing)"
           fi
 
-          # Save workspace copy to temp to avoid being overwritten by checkout
+          # MOVE workspace copy to temp to avoid git checkout conflicts
           if [ -f posted_cache.json ]; then
-            cp posted_cache.json /tmp/posted_cache.json
+            mv posted_cache.json /tmp/posted_cache.json
           else
             echo '{"last_index": 0}' > /tmp/posted_cache.json
           fi
@@ -83,7 +81,7 @@ jobs:
           echo "[DEBUG] Now on branch:"
           git rev-parse --abbrev-ref HEAD
 
-          # Copy the workspace updated file into the checked-out branch
+          # Copy the workspace saved file into the checked-out branch
           cp -f /tmp/posted_cache.json posted_cache.json
 
           echo "[DEBUG] posted_cache.json in branch after copy:"
