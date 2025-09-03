@@ -48,7 +48,7 @@ jobs:
 
           # fetch branch if exists
           git fetch origin video-cache || true
-          
+
           # checkout or create branch
           if git show-ref --verify --quiet refs/heads/video-cache; then
               git checkout video-cache
@@ -64,5 +64,5 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "Update posted index"
+            # push using GitHub token to avoid 403
             git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} HEAD:video-cache
-          fi
