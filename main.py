@@ -14,7 +14,7 @@ from google.oauth2 import service_account
 # ------------------ Config ------------------
 FB_TOKEN = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
 FB_PAGE = os.getenv("FACEBOOK_PAGE_ID")
-GOOGLE_CREDS_FILE = os.path.expanduser("~/.secrets/credentials.json")  # safe path
+GOOGLE_CREDS_FILE = os.path.expanduser("~/.secrets/credentials.json")
 FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
 CACHE_FILE = "posted_cache.json"
 VIDEOS_PER_RUN = 2
@@ -23,12 +23,20 @@ CAPTION = """Don't forget to subscribe for more!
 
 #movie #movieclips #movienetflix #fyp #fypシ゚viralシ #viral #facebookvideo
 """
-# ------------------ Cache ------------------
+
+# ------------------ Cache Handling ------------------
 def load_index():
-    if os.path.exists(CACHE_FILE):
+    if not os.path.exists(CACHE_FILE):
+        save_index(0)  # initialize if missing
+        return 0
+    try:
         with open(CACHE_FILE, "r") as f:
-            return json.load(f).get("last_index", 0)
-    return 0
+            data = json.load(f)
+            return data.get("last_index", 0)
+    except Exception:
+        # corrupted file, reset
+        save_index(0)
+        return 0
 
 def save_index(index):
     with open(CACHE_FILE, "w") as f:
@@ -47,7 +55,7 @@ def list_videos():
     query = f"'{FOLDER_ID}' in parents and mimeType contains 'video/' and trashed=false"
     results = service.files().list(q=query, fields="files(id,name)", pageSize=1000).execute()
     files = results.get("files", [])
-    files.sort(key=lambda x: int(''.join(filter(str.isdigit, x['name']))))
+    files.sort(key=lambda x: int(''.join(filter(str.isdigit, x['name'])) or 0))
     return files
 
 def get_video_url(file_id):
@@ -60,7 +68,7 @@ def post_video(video_url):
         "file_url": video_url,
         "description": CAPTION,
         "access_token": FB_TOKEN,
-        "published": "true"   # ensures the video is immediately visible
+        "published": "true"
     }
     r = requests.post(url, data=payload, timeout=120)
     r.raise_for_status()
@@ -81,8 +89,8 @@ def main():
     total = len(videos)
     index = load_index()
 
-    # pick 2 videos in order
-    to_post = [videos[index % total], videos[(index + 1) % total]]
+    # pick VIDEOS_PER_RUN in order
+    to_post = [videos[(index + i) % total] for i in range(VIDEOS_PER_RUN)]
 
     for v in to_post:
         video_url = get_video_url(v["id"])
