@@ -3,7 +3,7 @@ name: Post Videos to Facebook
 on:
   schedule:
     - cron: "0 10 * * *"  # daily at 10:00 UTC
-  workflow_dispatch:
+  workflow_dispatch:       # manual trigger
 
 jobs:
   post:
@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # needed to push
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -21,7 +21,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt google-api-python-client google-auth-httplib2 google-auth-oauthlib requests
+        run: pip install -r requirements.txt
 
       - name: Restore Google Service Account JSON
         run: |
@@ -40,12 +40,9 @@ jobs:
           git config user.name github-actions
           git config user.email github-actions@github.com
 
-          # Switch to video-cache branch
           git fetch origin video-cache
           git checkout video-cache
 
-          # Copy updated posted_cache.json into branch workspace
-          cp -f posted_cache.json . || true
           git add posted_cache.json
 
           if git diff --cached --quiet; then
