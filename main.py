@@ -2,42 +2,32 @@
 import os
 import json
 import base64
-from pathlib import Path
 import requests
+from pathlib import Path
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 
-# -----------------------------
-# Configuration via environment
-# -----------------------------
+# --- CONFIG ---
 CACHE_FILE = "posted_cache.json"
-GOOGLE_SERVICE_ACCOUNT_JSON_B64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
-FACEBOOK_PAGE_ACCESS_TOKEN = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
 FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID")
+FACEBOOK_PAGE_ACCESS_TOKEN = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
+DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+B64_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
 
-# Google Drive API scopes
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+CAPTION = ("Don't forget to subscribe for more!\n\n"
+           "#movie #movieclips #movienetflix #fyp #fypシ゚viralシ #viral #facebookvideo")
 
-# Caption for all posts
-CAPTION = (
-    "Don't forget to subscribe for more!\n\n"
-    "#movie #movieclips #movienetflix #fyp #fypシ゚viralシ #viral #facebookvideo"
+if not all([FACEBOOK_PAGE_ID, FACEBOOK_PAGE_ACCESS_TOKEN, DRIVE_FOLDER_ID, B64_SERVICE_ACCOUNT_JSON]):
+    raise RuntimeError("Missing one of the required environment variables.")
+
+# --- DECODE GOOGLE SERVICE ACCOUNT ---
+service_account_json = base64.b64decode(B64_SERVICE_ACCOUNT_JSON).decode("utf-8")
+creds = Credentials.from_service_account_info(
+    json.loads(service_account_json),
+    scopes=["https://www.googleapis.com/auth/drive.readonly"]
 )
 
-# -----------------------------
-# Google Drive authentication
-# -----------------------------
-if not GOOGLE_SERVICE_ACCOUNT_JSON_B64:
-    raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON not set!")
-
-GOOGLE_SERVICE_ACCOUNT_JSON = base64.b64decode(GOOGLE_SERVICE_ACCOUNT_JSON_B64)
-creds_info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
-creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-
-# -----------------------------
-# Cache helpers
-# -----------------------------
+# --- CACHE UTILITIES ---
 def load_cache():
     if Path(CACHE_FILE).exists():
         try:
@@ -49,14 +39,12 @@ def load_cache():
 
 def save_cache(cache):
     with open(CACHE_FILE, "w") as f:
-        json.dump(cache, f)
+        json.dump(cache, f, indent=2)
 
-# -----------------------------
-# Google Drive helpers
-# -----------------------------
+# --- FETCH VIDEOS FROM DRIVE ---
 def fetch_videos_from_drive():
     service = build("drive", "v3", credentials=creds)
-    query = f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and mimeType contains 'video/' and trashed=false"
+    query = f"'{DRIVE_FOLDER_ID}' in parents and mimeType contains 'video/' and trashed=false"
     results = (
         service.files()
         .list(q=query, orderBy="createdTime asc", fields="files(id, name)")
@@ -64,47 +52,50 @@ def fetch_videos_from_drive():
     )
     return results.get("files", [])
 
+# --- GET NEXT VIDEO ---
 def get_next_video():
     cache = load_cache()
-    posted_ids = set(cache.get("posted_ids", []))
+    posted_ids = cache.get("posted_ids", [])
+    
     videos = fetch_videos_from_drive()
     if not videos:
         raise RuntimeError("⚠️ No videos found in Drive folder!")
 
-    # Pick first unposted video
-    for video in videos:
-        if video["id"] not in posted_ids:
-            posted_ids.add(video["id"])
-            cache["posted_ids"] = list(posted_ids)
-            save_cache(cache)
-            return video
+    # Filter out already posted
+    unposted_videos = [v for v in videos if v["id"] not in posted_ids]
 
-    # All videos posted, reset
-    cache["posted_ids"] = []
+    if not unposted_videos:
+        # All videos posted → start over
+        next_video = videos[0]
+        posted_ids = []  # reset cache
+    else:
+        next_video = unposted_videos[0]
+
+    # Update cache
+    posted_ids.append(next_video["id"])
+    cache["posted_ids"] = posted_ids
     save_cache(cache)
-    return videos[0]
 
-# -----------------------------
-# Facebook helpers
-# -----------------------------
+    return next_video
+
+# --- POST VIDEO TO FACEBOOK ---
 def post_video_to_facebook(video_id, video_name):
-    """Post video to Facebook page via Drive file URL."""
     video_url = f"https://drive.google.com/uc?id={video_id}&export=download"
-    url = f"https://graph.facebook.com/v16.0/{FACEBOOK_PAGE_ID}/videos"
-    data = {
-        "url": video_url,
-        "caption": CAPTION,
-        "access_token": FACEBOOK_PAGE_ACCESS_TOKEN,
-        "published": True
-    }
-    response = requests.post(url, data=data)
-    if response.status_code != 200:
-        raise RuntimeError(f"Facebook API error: {response.text}")
-    print(f"✅ Posted '{video_name}' to Facebook.")
+    url = f"https://graph.facebook.com/v18.0/{FACEBOOK_PAGE_ID}/videos"
 
-# -----------------------------
-# Main script
-# -----------------------------
+    data = {
+        "access_token": FACEBOOK_PAGE_ACCESS_TOKEN,
+        "file_url": video_url,
+        "description": CAPTION,
+        "published": "true"
+    }
+
+    response = requests.post(url, data=data)
+    if not response.ok:
+        raise RuntimeError(f"Facebook API error: {response.text}")
+    print(f"[SUCCESS] Posted video: {video_name}")
+
+# --- MAIN ---
 def main():
     video = get_next_video()
     print(f"[DEBUG] Selected video: {video['name']} ({video['id']})")
