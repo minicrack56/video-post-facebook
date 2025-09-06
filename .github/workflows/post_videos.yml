@@ -1,31 +1,36 @@
-name: Post Videos to Facebook
-
-on:
-  schedule:
-    - cron: "0 12 * * *"  # Run once a day at 12:00 UTC
-  workflow_dispatch:
-
 jobs:
-  post_video:
+  post-video:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
 
+      # Restore cache
+      - name: Restore posted cache
+        uses: actions/cache@v3
+        id: cache-posted
+        with:
+          path: posted_cache.json
+          key: posted-cache-v1
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install google-api-python-client google-auth requests
+        run: pip install --upgrade google-api-python-client requests
 
-      - name: Run post script
+      - name: Post video
         env:
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
           FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
           FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
-        run: |
-          python main.py
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python main.py
+
+      # Save updated cache
+      - name: Save posted cache
+        uses: actions/cache@v3
+        with:
+          path: posted_cache.json
+          key: posted-cache-v1
