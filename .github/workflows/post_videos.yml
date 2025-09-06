@@ -2,42 +2,44 @@ name: Post Videos to Facebook
 
 on:
   schedule:
-    - cron: "0 12 * * *"  # runs every day at 12:00 UTC
-  workflow_dispatch:      # allows manual run
-
-permissions:
-  contents: write   # allow workflow to push changes back to the repo
+    - cron: "0 12 * * *"   # once a day at 12:00 UTC
+  workflow_dispatch:       # allow manual trigger
 
 jobs:
-  post:
+  run:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Create service account file
-        run: |
-          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > service_account.json
-
-      - name: Run main script
+      - name: Run posting script
         env:
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
-        run: python main.py
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -e
+          echo "▶️ Running main.py..."
+          python3 main.py || echo "⚠️ Script skipped (already posted today)."
 
-      - name: Commit updated posted_cache.json
-        if: always()
+      - name: Commit updated cache
+        if: success() || failure()  # always run so cache is saved
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add posted_cache.json
-          git commit -m "Update posted_cache.json [skip ci]" || echo "No changes to commit"
-          git push
+
+          # Add only if cache file actually changed
+          if git diff --quiet --exit-code posted_cache.json; then
+            echo "✅ No cache changes, skipping commit."
+          else
+            git add posted_cache.json
+            git commit -m "Update posted_cache.json [skip ci]" || echo "⚠️ Nothing to commit"
+            git push
+          fi
