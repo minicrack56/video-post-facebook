@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
 import os
 import json
+import base64
 from pathlib import Path
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 import requests
 
-# --- Configuration ---
-CACHE_FILE = "posted_cache.json"
+# === Configuration from GitHub Secrets ===
 FACEBOOK_PAGE_ACCESS_TOKEN = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
 FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID")
 GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
-GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")  # Base64 encoded
 
-# Caption for Facebook videos
-VIDEO_CAPTION = (
-    "Don't forget to subscribe for more!\n\n"
-    "#movie #movieclips #movienetflix #fyp #fypシ゚viralシ #viral #facebookvideo"
-)
-
-# --- Google Drive API setup ---
+# === Constants ===
+CACHE_FILE = "posted_cache.json"
+CAPTION = "Don't forget to subscribe for more!\n\n#movie #movieclips #movienetflix #fyp #fypシ゚viralシ #viral #facebookvideo"
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
-creds = Credentials.from_service_account_info(json.loads(GOOGLE_SERVICE_ACCOUNT_JSON), scopes=SCOPES)
 
-# --- Cache handling ---
+# === Load service account credentials ===
+decoded_json = base64.b64decode(GOOGLE_SERVICE_ACCOUNT_JSON).decode("utf-8")
+service_account_info = json.loads(decoded_json)
+creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
+
+# === Cache handling ===
 def load_cache():
     if Path(CACHE_FILE).exists():
         try:
@@ -31,15 +31,14 @@ def load_cache():
                 return json.load(f)
         except json.JSONDecodeError:
             pass
-    return {"posted_ids": []}
+    return {"last_index": -1}
 
 def save_cache(cache):
     with open(CACHE_FILE, "w") as f:
         json.dump(cache, f)
 
-# --- Fetch videos from Drive ---
+# === Google Drive API ===
 def fetch_videos_from_drive():
-    """Fetch all video files in folder, oldest to newest."""
     service = build("drive", "v3", credentials=creds)
     query = f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and mimeType contains 'video/' and trashed=false"
     results = (
@@ -49,49 +48,45 @@ def fetch_videos_from_drive():
     )
     return results.get("files", [])
 
-# --- Get next video to post ---
 def get_next_video():
     cache = load_cache()
-    posted_ids = cache.get("posted_ids", [])
-    videos = fetch_videos_from_drive()
+    last_index = cache.get("last_index", -1)
 
+    videos = fetch_videos_from_drive()
     if not videos:
         raise RuntimeError("⚠️ No videos found in Drive folder!")
 
-    # Find first unposted video
-    for video in videos:
-        if video["id"] not in posted_ids:
-            posted_ids.append(video["id"])
-            cache["posted_ids"] = posted_ids
-            save_cache(cache)
-            return video
+    # Loop from oldest to newest, then restart
+    next_index = (last_index + 1) % len(videos)
+    video = videos[next_index]
 
-    # If all videos were posted, loop back to the oldest video
-    print("[INFO] All videos have been posted. Looping back to the first video.")
-    video = videos[0]
-    cache["posted_ids"] = [video["id"]]
+    cache["last_index"] = next_index
     save_cache(cache)
+
     return video
 
-# --- Post video to Facebook ---
-def post_to_facebook(video_id, video_name):
-    url = f"https://graph.facebook.com/{FACEBOOK_PAGE_ID}/videos"
-    params = {
+# === Facebook upload ===
+def post_video_to_facebook(video_id, video_name):
+    """Post video using upload URL"""
+    url = f"https://graph.facebook.com/v17.0/{FACEBOOK_PAGE_ID}/videos"
+    data = {
         "access_token": FACEBOOK_PAGE_ACCESS_TOKEN,
-        "description": VIDEO_CAPTION,
-        "file_url": f"https://drive.google.com/uc?id={video_id}&export=download"
+        "description": CAPTION,
+        "published": "true"  # Ensure it publishes immediately
     }
-    response = requests.post(url, params=params)
-    if response.status_code == 200:
-        print(f"[SUCCESS] Posted video '{video_name}' to Facebook!")
-    else:
-        print(f"[ERROR] Failed to post video '{video_name}': {response.text}")
+    files = {
+        "file": requests.get(f"https://drive.google.com/uc?id={video_id}&export=download", stream=True).raw
+    }
 
-# --- Main function ---
+    response = requests.post(url, data=data, files=files)
+    if response.status_code != 200:
+        raise RuntimeError(f"Facebook upload failed: {response.text}")
+    print(f"[SUCCESS] Posted video: {video_name}")
+
 def main():
     video = get_next_video()
     print(f"[DEBUG] Selected video: {video['name']} ({video['id']})")
-    post_to_facebook(video['id'], video['name'])
+    post_video_to_facebook(video['id'], video['name'])
 
 if __name__ == "__main__":
     main()
